@@ -165,6 +165,7 @@ class Engine:
             EventType.CREDIT: self._apply_movement,
             EventType.DEBIT: self._apply_movement,
             EventType.AUTHORIZATION: self._apply_authorization,
+            EventType.SETTLEMENT: self._apply_settlement,
         }[event.type]
         return handler(event, day)
 
@@ -218,6 +219,34 @@ class Engine:
             f"{event.auth_id} hold {account.currency.format(amount)}; "
             f"available {account.currency.format(available)} -> "
             f"{account.currency.format(projected)}",
+        )
+
+    def _apply_settlement(self, event: Event, day: int) -> EventResult:
+        account = self.state.accounts[event.account_id]
+        hold = self.state.holds[event.auth_id]
+        amount = account.currency.quantize(event.amount)
+        entry = self.state.journal.append(
+            event_id=event.id,
+            account_id=event.account_id,
+            posting_day=day,
+            value_date=event.value_date,
+            amount=-amount,
+            kind="SETTLEMENT",
+            memo=f"settles {event.auth_id}",
+        )
+        hold.released_day = day
+        hold.settled_by = event.id
+        note = ""
+        if amount > hold.amount:
+            note = (f"; settled over the hold by "
+                    f"{account.currency.format(amount - hold.amount)}")
+        elif amount < hold.amount:
+            note = (f"; released unused hold "
+                    f"{account.currency.format(hold.amount - amount)}")
+        return EventResult(
+            event.id, day, "SETTLEMENT", Outcome.POSTED,
+            f"{event.auth_id} settles {account.currency.format(amount)}{note}",
+            (entry,),
         )
 
     # ---------- end of day ----------
