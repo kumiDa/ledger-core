@@ -34,6 +34,8 @@ WINDOW_DAYS = 6
 
 class Outcome(str, Enum):
     POSTED = "POSTED"        # movement booked
+    APPROVED = "APPROVED"    # authorization accepted, hold placed
+    DECLINED = "DECLINED"    # authorization refused on available balance
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,20 @@ class Account:
     id: str
     currency: Currency
     opening_balance: Decimal
+
+
+@dataclass
+class Hold:
+    auth_id: str
+    account_id: str
+    amount: Decimal
+    placed_day: int
+    released_day: Optional[int] = None
+    settled_by: Optional[str] = None
+
+    @property
+    def active(self) -> bool:
+        return self.released_day is None
 
 
 @dataclass
@@ -58,6 +74,8 @@ class DayReport:
     day: int
     account_id: str
     closing_balance: Decimal
+    active_holds: Decimal
+    available_balance: Decimal
 
 
 @dataclass
@@ -66,6 +84,7 @@ class ReplayResult:
     journal: Journal
     results: list[EventResult] = field(default_factory=list)
     days: dict[int, list[DayReport]] = field(default_factory=dict)
+    holds: dict[str, Hold] = field(default_factory=dict)
 
     def result_for(self, event_id: str) -> EventResult:
         for r in self.results:
@@ -113,6 +132,22 @@ class Engine:
             known_through_day=through_day,
         )
 
+    def active_hold_total(self, account_id: str) -> Decimal:
+        account = self.state.accounts[account_id]
+        total = account.currency.zero()
+        for hold in self.state.holds.values():
+            if hold.account_id == account_id and hold.active:
+                total += hold.amount
+        return account.currency.quantize(total)
+
+    def available_balance(self, account_id: str, *, through_day: int) -> Decimal:
+        """Ledger balance minus active holds. The authorization gate."""
+        account = self.state.accounts[account_id]
+        return account.currency.quantize(
+            self.ledger_balance(account_id, through_day=through_day)
+            - self.active_hold_total(account_id)
+        )
+
     # ---------- replay ----------
 
     def replay(self, events: list[Event]) -> ReplayResult:
@@ -129,6 +164,7 @@ class Engine:
         handler = {
             EventType.CREDIT: self._apply_movement,
             EventType.DEBIT: self._apply_movement,
+            EventType.AUTHORIZATION: self._apply_authorization,
         }[event.type]
         return handler(event, day)
 
@@ -157,6 +193,33 @@ class Engine:
         return EventResult(event.id, day, event.type.value, Outcome.POSTED,
                            detail, tuple(entries))
 
+    def _apply_authorization(self, event: Event, day: int) -> EventResult:
+        account = self.state.accounts[event.account_id]
+        if event.auth_id in self.state.holds:
+            return EventResult(event.id, day, "AUTHORIZATION", Outcome.REJECTED,
+                               f"{event.auth_id} already exists; auth ids are unique")
+        amount = account.currency.quantize(event.amount)
+        available = self.available_balance(event.account_id, through_day=day)
+        projected = account.currency.quantize(available - amount)
+        # Approve only if available balance stays at or above zero after the hold.
+        if projected < 0:
+            return EventResult(
+                event.id, day, "AUTHORIZATION", Outcome.DECLINED,
+                f"{event.auth_id} hold {account.currency.format(amount)} would take "
+                f"available from {account.currency.format(available)} to "
+                f"{account.currency.format(projected)}",
+            )
+        self.state.holds[event.auth_id] = Hold(
+            auth_id=event.auth_id, account_id=event.account_id,
+            amount=amount, placed_day=day,
+        )
+        return EventResult(
+            event.id, day, "AUTHORIZATION", Outcome.APPROVED,
+            f"{event.auth_id} hold {account.currency.format(amount)}; "
+            f"available {account.currency.format(available)} -> "
+            f"{account.currency.format(projected)}",
+        )
+
     # ---------- end of day ----------
 
     def _close_day(self, day: int) -> None:
@@ -166,5 +229,7 @@ class Engine:
                 day=day,
                 account_id=account_id,
                 closing_balance=self.ledger_balance(account_id, through_day=day),
+                active_holds=self.active_hold_total(account_id),
+                available_balance=self.available_balance(account_id, through_day=day),
             ))
         self.state.days[day] = reports
