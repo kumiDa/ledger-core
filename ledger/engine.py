@@ -36,6 +36,7 @@ class Outcome(str, Enum):
     POSTED = "POSTED"        # movement booked
     APPROVED = "APPROVED"    # authorization accepted, hold placed
     DECLINED = "DECLINED"    # authorization refused on available balance
+    REJECTED = "REJECTED"    # event could not be applied at all
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,10 @@ class EventResult:
     detail: str
     entries: tuple[Entry, ...] = ()
 
+    @property
+    def is_error(self) -> bool:
+        return self.outcome is Outcome.REJECTED
+
 
 @dataclass
 class DayReport:
@@ -85,6 +90,10 @@ class ReplayResult:
     results: list[EventResult] = field(default_factory=list)
     days: dict[int, list[DayReport]] = field(default_factory=dict)
     holds: dict[str, Hold] = field(default_factory=dict)
+
+    @property
+    def errors(self) -> list[EventResult]:
+        return [r for r in self.results if r.is_error]
 
     def result_for(self, event_id: str) -> EventResult:
         for r in self.results:
@@ -223,7 +232,20 @@ class Engine:
 
     def _apply_settlement(self, event: Event, day: int) -> EventResult:
         account = self.state.accounts[event.account_id]
-        hold = self.state.holds[event.auth_id]
+        hold = self.state.holds.get(event.auth_id)
+        if hold is None:
+            # No authorization ever existed. Nothing is released and, crucially,
+            # no entry is written -- the funds do not leave the account.
+            return EventResult(
+                event.id, day, "SETTLEMENT", Outcome.REJECTED,
+                f"no authorization {event.auth_id} in the ledger; "
+                f"{account.currency.format(event.amount)} not posted",
+            )
+        if not hold.active:
+            return EventResult(
+                event.id, day, "SETTLEMENT", Outcome.REJECTED,
+                f"{event.auth_id} already settled by {hold.settled_by}",
+            )
         amount = account.currency.quantize(event.amount)
         entry = self.state.journal.append(
             event_id=event.id,
