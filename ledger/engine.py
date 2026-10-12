@@ -386,3 +386,20 @@ class Engine:
                 )
             reports.append(report)
         self.state.days[day] = reports
+
+    # ---------- restatement ----------
+
+    def restate(self, account_id: str, *, value_date_through: int,
+                as_of_day: int, exclude_kinds: tuple[str, ...] = ()) -> Decimal:
+        """The balance for a value date as the books looked on a later day.
+
+        This is how a backdated entry's effect is *seen* without any closed
+        day being rewritten.
+        """
+        account = self.state.accounts[account_id]
+        return self.state.journal.balance(
+            account_id, account.currency,
+            value_date_through=value_date_through,
+            known_through_day=as_of_day,
+            kinds_excluded=exclude_kinds,
+        )
