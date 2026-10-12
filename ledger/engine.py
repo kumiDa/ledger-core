@@ -29,6 +29,7 @@ from .entries import Entry, Journal
 from .events import Event, EventType
 from .money import Currency, split_evenly
 
+OVERDRAFT_FEE = {"AED": Decimal("25.00"), "BHD": Decimal("25.000")}
 WINDOW_DAYS = 6
 
 
@@ -78,6 +79,8 @@ class EventResult:
 class DayReport:
     day: int
     account_id: str
+    closing_before_fee: Decimal
+    fee_assessed: Decimal
     closing_balance: Decimal
     active_holds: Decimal
     available_balance: Decimal
@@ -106,6 +109,9 @@ class ReplayResult:
             if r.account_id == account_id:
                 return r
         raise KeyError((day, account_id))
+
+    def fees_for(self, account_id: str) -> list[Entry]:
+        return [e for e in self.journal.for_account(account_id) if e.kind == "FEE"]
 
 
 class Engine:
@@ -313,10 +319,30 @@ class Engine:
 
     def _close_day(self, day: int) -> None:
         reports = []
-        for account_id in self.state.accounts:
+        for account_id, account in self.state.accounts.items():
+            before_fee = self.ledger_balance(account_id, through_day=day)
+
+            # Overdraft fee: once per day per account, when the day closes
+            # negative. Value-dated to the day assessed, which is this day.
+            fee = account.currency.zero()
+            if before_fee < 0:
+                fee = account.currency.quantize(OVERDRAFT_FEE[account.currency.code])
+                self.state.journal.append(
+                    event_id=f"FEE-{account_id}-D{day}",
+                    account_id=account_id,
+                    posting_day=day,
+                    value_date=day,
+                    amount=-fee,
+                    kind="FEE",
+                    memo=f"overdraft fee, day {day} closed at "
+                         f"{account.currency.format(before_fee)}",
+                )
+
             reports.append(DayReport(
                 day=day,
                 account_id=account_id,
+                closing_before_fee=before_fee,
+                fee_assessed=fee,
                 closing_balance=self.ledger_balance(account_id, through_day=day),
                 active_holds=self.active_hold_total(account_id),
                 available_balance=self.available_balance(account_id, through_day=day),
