@@ -175,6 +175,7 @@ class Engine:
             EventType.DEBIT: self._apply_movement,
             EventType.AUTHORIZATION: self._apply_authorization,
             EventType.SETTLEMENT: self._apply_settlement,
+            EventType.REVERSAL: self._apply_reversal,
         }[event.type]
         return handler(event, day)
 
@@ -269,6 +270,43 @@ class Engine:
             event.id, day, "SETTLEMENT", Outcome.POSTED,
             f"{event.auth_id} settles {account.currency.format(amount)}{note}",
             (entry,),
+        )
+
+    def _apply_reversal(self, event: Event, day: int) -> EventResult:
+        account = self.state.accounts[event.account_id]
+        targets = self.state.journal.entries_for_event(event.reverses)
+        if not targets:
+            return EventResult(
+                event.id, day, "REVERSAL", Outcome.REJECTED,
+                f"nothing to reverse: {event.reverses} produced no ledger entries",
+            )
+        already = {
+            e.reverses_seq for e in self.state.journal if e.reverses_seq is not None
+        }
+        if any(t.seq in already for t in targets):
+            return EventResult(
+                event.id, day, "REVERSAL", Outcome.REJECTED,
+                f"{event.reverses} is already reversed",
+            )
+        entries = []
+        for target in targets:
+            # A reversal is an append, not an erasure. The original entry
+            # keeps its seq, its sign, and its place in the journal forever.
+            entries.append(self.state.journal.append(
+                event_id=event.id,
+                account_id=target.account_id,
+                posting_day=day,
+                value_date=event.value_date,
+                amount=-target.amount,
+                kind="REVERSAL",
+                memo=f"reverses entry #{target.seq} ({event.reverses})",
+                reverses_seq=target.seq,
+            ))
+        total = account.currency.quantize(sum(e.amount for e in entries))
+        return EventResult(
+            event.id, day, "REVERSAL", Outcome.POSTED,
+            f"reverses {event.reverses} ({account.currency.format(total)})",
+            tuple(entries),
         )
 
     # ---------- end of day ----------
