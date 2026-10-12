@@ -30,6 +30,7 @@ from .events import Event, EventType
 from .money import Currency, split_evenly
 
 OVERDRAFT_FEE = {"AED": Decimal("25.00"), "BHD": Decimal("25.000")}
+DAILY_INTEREST_RATE = Decimal("0.0004")   # 0.04% per day
 WINDOW_DAYS = 6
 
 
@@ -84,6 +85,7 @@ class DayReport:
     closing_balance: Decimal
     active_holds: Decimal
     available_balance: Decimal
+    interest_accrued: Decimal
 
 
 @dataclass
@@ -93,6 +95,7 @@ class ReplayResult:
     results: list[EventResult] = field(default_factory=list)
     days: dict[int, list[DayReport]] = field(default_factory=dict)
     holds: dict[str, Hold] = field(default_factory=dict)
+    accruals: dict[str, list[Decimal]] = field(default_factory=dict)
 
     @property
     def errors(self) -> list[EventResult]:
@@ -124,6 +127,7 @@ class Engine:
             journal=Journal(),
         )
         for account in accounts:
+            self.state.accruals[account.id] = []
             if account.opening_balance != 0:
                 self.state.journal.append(
                     event_id=f"OPENING-{account.id}",
@@ -338,13 +342,23 @@ class Engine:
                          f"{account.currency.format(before_fee)}",
                 )
 
+            closing = self.ledger_balance(account_id, through_day=day)
+
+            # Interest: positive balances only, on the post-fee closing
+            # balance, rounded to the currency's own precision each day.
+            accrual = account.currency.zero()
+            if closing > 0:
+                accrual = account.currency.quantize(closing * DAILY_INTEREST_RATE)
+            self.state.accruals[account_id].append(accrual)
+
             reports.append(DayReport(
                 day=day,
                 account_id=account_id,
                 closing_before_fee=before_fee,
                 fee_assessed=fee,
-                closing_balance=self.ledger_balance(account_id, through_day=day),
+                closing_balance=closing,
                 active_holds=self.active_hold_total(account_id),
                 available_balance=self.available_balance(account_id, through_day=day),
+                interest_accrued=accrual,
             ))
         self.state.days[day] = reports
