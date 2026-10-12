@@ -30,6 +30,20 @@ class Currency:
         """
         return Decimal(amount).quantize(self.quantum, rounding=ROUND_HALF_UP)
 
+    def parse(self, text: str) -> Decimal:
+        """Build an amount from a literal, rejecting over-precise input.
+
+        AED 1.005 is not an AED amount. Silently rounding it would let a
+        caller's precision error disappear into the ledger, so it raises.
+        """
+        value = Decimal(text)
+        if value != self.quantize(value):
+            raise ValueError(
+                f"{text} has more precision than {self.code} "
+                f"({self.places} places) can represent"
+            )
+        return self.quantize(value)
+
     def format(self, amount: Decimal) -> str:
         return f"{self.quantize(amount):,.{self.places}f} {self.code}"
 
