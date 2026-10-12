@@ -1,6 +1,6 @@
 # Ambiguities found and how each was resolved
 
-Fourteen places where the brief admits more than one reading. Each entry states
+Fifteen places where the brief admits more than one reading. Each entry states
 the competing readings, the one implemented, and what would change the decision.
 Where a resolution has a price, the price is named.
 
@@ -292,6 +292,48 @@ the closing balance *after* capitalization (AED 440.83) but not in the figure th
 Day 6 accrual was taken on (AED 440.00). The report prints both lines rather than
 one, because collapsing them is how an account ends up earning interest on
 interest it has not been credited yet.
+
+---
+
+## 15. What is the overdraft fee on a BHD account?
+
+**The ambiguity.** The fee is given as "Overdraft fee: AED 25.00" — a single
+amount, in one currency, for a system holding two. ACC-002 is denominated in
+BHD. The brief supplies no per-currency fee schedule and no FX rate, so there is
+no stated answer for what ACC-002 is charged if it closes negative.
+
+**Resolved: BHD 25.000** — the same numeral, re-denominated, stored per currency
+in `OVERDRAFT_FEE` keyed by currency code.
+
+**This is the weakest-justified constant in the system, and it is worth being
+blunt about why.** Carrying the numeral across currencies is an implicit 1:1 FX
+assumption, and these two currencies are nowhere near 1:1 — at their
+long-standing pegs one dinar is worth roughly ten dirhams, so BHD 25.000 is on
+the order of ten times the penalty AED 25.00 represents. As a fee it is almost
+certainly wrong in magnitude.
+
+The alternatives are each worse in a structural way:
+
+| Option | Why not |
+|---|---|
+| Convert AED 25.00 to BHD | Needs an FX rate the brief does not give — and a rate in a ledger core drags in a rate source, a rate date, and conversion rounding. That is a different system. |
+| Leave the fee AED-only, so BHD accounts cannot be charged | Makes ACC-002 structurally un-chargeable by silent omission — a policy decision disguised as a missing dict key. |
+| One AED-shaped literal applied to any account | Quantizes 25.00 into a 3-decimal account and writes the wrong precision into the journal. |
+
+So the chosen option is wrong in *magnitude* while the others are wrong in
+*kind*, and a magnitude error that is loudly documented and never silently
+applied is the one I would rather ship.
+
+**Why it changes no output.** ACC-002 never closes negative on this stream, so
+the BHD entry is never read and no figure in the report depends on it. It is a
+latent constant, not an active one.
+
+**What would change it.** A per-currency fee schedule in the brief, which is
+what a real product would specify. Failing that, the honest implementation is to
+*refuse* to assess a fee in a currency with no stated fee and raise instead of
+guessing — the dict already fails loudly with `KeyError` for any third currency,
+and the only reason BHD gets a value at all is that the brief names a BHD
+account while declining to price it.
 
 ---
 

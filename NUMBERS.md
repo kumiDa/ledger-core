@@ -1,7 +1,7 @@
 # Every constant, and why that value and not half it
 
-Nine constants. Four are dictated by the brief and are reproduced here with the
-consequence of changing them; five are mine, and those carry the real argument.
+Ten constants. Four are dictated by the brief and are reproduced here with the
+consequence of changing them; six are mine, and those carry the real argument.
 
 Each entry says what the constant is, where it lives, and what breaks at half
 and at double. "Why not half it" is the useful question for the chosen ones —
@@ -26,12 +26,19 @@ on: 452.50 × 0.0004 = 0.181 → 0.18, so the total stays 0.83 by coincidence. A
 AED 12.51 it would not. This coupling — fee changes interest — is the reason the
 fee is a named constant rather than a literal at the one site that books it.
 
-**Stored per currency**, as a dict keyed by currency code, with BHD 25.000
-alongside AED 25.00. ACC-002 never goes negative so the BHD entry is never used
-on this stream, but the alternative is a single AED-shaped literal applied to a
-3-decimal account, which quantizes silently and gives the wrong precision in the
-journal. The dict makes the gap a `KeyError` at the moment a third currency
-appears, rather than a rounding artifact.
+**Stored per currency**, as a dict keyed by currency code, so a 3-decimal
+account cannot be charged an AED-shaped literal that quantizes silently. The
+dict also makes a third currency a loud `KeyError` rather than a rounding
+artifact.
+
+**The BHD value is the weakest-justified number in this repo.** The brief prices
+the fee only in AED and gives no FX rate, so BHD 25.000 carries the numeral
+across currencies — an implicit 1:1 assumption between two currencies that sit
+roughly 1:10 at their pegs. As a penalty it is likely an order of magnitude too
+large. It is never exercised (ACC-002 never closes negative, so no figure in the
+report depends on it), but "unexercised" is not "justified". Argued in full,
+including the three alternatives and why each is worse in kind, in
+AMBIGUITIES.md §15.
 
 ### 2. Daily interest rate — 0.0004 (0.04% per day)
 
@@ -181,6 +188,24 @@ twelve actual movements.
 including whether Day 5 goes negative at all. An opening balance of AED 155.00 or
 more on ACC-001 means no overdraft fee, no Day 5 trigger, and the entire fee
 question in this brief evaporates.
+
+### 10. Report rule width — 78 characters
+
+`ledger/report.py: RULE`, `THIN`
+
+Purely cosmetic, and listed only because the brief asks for *every* constant I
+chose. 78 is the conventional terminal width that still fits inside an 80-column
+view with a two-space margin, which keeps the journal table and the restatement
+grid from wrapping when the output is pasted into a diff, a terminal, or a code
+review.
+
+**At half (39).** The journal table and the restatement grid both exceed it and
+wrap, which makes the restatement grid — the one piece of output that has to be
+read as a grid — unreadable. **At double (156)** nothing breaks, but the output
+stops fitting a standard terminal.
+
+No financial figure depends on it. It is in `report.py`, which holds rendering
+and no logic, so it cannot affect a balance.
 
 ---
 

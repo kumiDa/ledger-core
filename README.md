@@ -208,7 +208,7 @@ balance design that was replaced because of this.
 
 | | |
 |---|---|
-| [NUMBERS.md](NUMBERS.md) | every constant, why that value, what breaks at half and double |
-| [AMBIGUITIES.md](AMBIGUITIES.md) | 14 ambiguities in the brief and how each was resolved |
+| [NUMBERS.md](NUMBERS.md) | all ten constants, why that value, what breaks at half and double |
+| [AMBIGUITIES.md](AMBIGUITIES.md) | 15 ambiguities in the brief and how each was resolved |
 | [REJECTED.md](REJECTED.md) | 3 refused criteria, 1 vacuous one, 3 abandoned approaches |
 | [WORKLOG.md](WORKLOG.md) | what was built when, including the wrong turns |

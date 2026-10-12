@@ -128,7 +128,7 @@ asserted, not just described. 43 tests green.
 
 ## 14:56 — Wrote AMBIGUITIES.md, caught a second error
 
-14 ambiguities. §2 (can a closed day grow a fee?) and §1 (two dates, not one) are
+15 ambiguities. §2 (can a closed day grow a fee?) and §1 (two dates, not one) are
 the ones that move money; §9–13 cover behaviour this stream never exercises,
 which is where a second reviewer would disagree.
 
@@ -139,7 +139,9 @@ spelled out.
 
 ## 14:57 — Wrote NUMBERS.md, caught a third error
 
-Nine constants, each with what breaks at half and at double. Ran the sensitivity
+Nine constants, each with what breaks at half and at double. (A tenth, the
+report rule width, and a fifteenth ambiguity were added later during the
+deliverables audit — see the final entry.) Ran the sensitivity
 claims rather than asserting them, which caught the third mistake:
 
 **Error caught:** I wrote that truncation instead of half-up takes ACC-001's
@@ -227,6 +229,39 @@ is recorded here rather than left to be discovered.
 
 ---
 
+## 15:18 — Deliverables audit against the brief
+
+Re-read the brief line by line and checked each requirement against the repo
+rather than against memory. Grepped the production code for every numeric and
+mode literal and diffed that list against NUMBERS.md; grepped the docs for
+coverage of each non-negotiable rule.
+
+Two real gaps found, both fixed:
+
+**The BHD overdraft fee was an undocumented invention.** `OVERDRAFT_FEE` carries
+`BHD 25.000` alongside `AED 25.00`, and NUMBERS.md §1 justified its *precision*
+while silently skipping its *magnitude*. The brief prices the fee only in AED and
+gives no FX rate, so carrying the numeral across currencies is an implicit 1:1
+assumption between two currencies that sit roughly 1:10 at their pegs — the BHD
+fee is likely an order of magnitude too large. It is never exercised, because
+ACC-002 never closes negative, but unexercised is not justified. Added
+AMBIGUITIES.md §15 with the three alternatives and why each is worse in kind,
+and rewrote NUMBERS.md §1 to name the problem instead of stepping around it.
+
+**One chosen constant was missing from NUMBERS.md.** The brief asks for *every*
+constant; the report's 78-character rule width was not listed. Added as §10,
+with a note that it lives in the render-only module and cannot touch a balance.
+
+Everything else in the brief checks out: the four printed per-day items, the two
+accounts and their precisions, all five non-negotiable rules, all ten events,
+the eight criteria with four refused, the five required documents, and the one
+annotated failing test.
+
+Counts corrected across README, NUMBERS and this file (nine constants → ten,
+fourteen ambiguities → fifteen).
+
+---
+
 ## Honest assessment of what is weak
 
 - **AMBIGUITIES.md §9 is decided by argument, not by test.** Whether availability
@@ -239,6 +274,10 @@ is recorded here rather than left to be discovered.
 - **Half-up vs half-even is not exercised either.** No accrual in this window
   lands on a tie, so the choice rests on the reasoning in NUMBERS.md §5 rather
   than on any figure in the output.
+- **The BHD overdraft fee is probably wrong in magnitude** (AMBIGUITIES.md §15).
+  It is latent — ACC-002 never overdraws — but if a BHD account ever closed
+  negative, this engine would charge roughly ten times the intended penalty. The
+  honest fix needs a per-currency fee schedule the brief does not provide.
 - **Balances are O(entries) per query.** Correct and irrelevant at six days.
   A real system needs a snapshot index, and that index must be a cache, never
   the record.
