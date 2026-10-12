@@ -8,7 +8,9 @@ reversed entry stays on the books forever.
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Iterator, Optional
+from typing import Iterable, Iterator, Optional
+
+from .money import Currency
 
 
 @dataclass(frozen=True)
@@ -75,3 +77,33 @@ class Journal:
 
     def entries_for_event(self, event_id: str) -> tuple[Entry, ...]:
         return tuple(e for e in self._entries if e.event_id == event_id)
+
+    def balance(
+        self,
+        account_id: str,
+        currency: Currency,
+        *,
+        value_date_through: int,
+        known_through_day: Optional[int] = None,
+        kinds_excluded: Iterable[str] = (),
+    ) -> Decimal:
+        """Sum of entries with value_date <= `value_date_through`.
+
+        `known_through_day` bounds which entries are considered to exist yet.
+        The pair is what makes a restatement expressible: "the Day 2 balance
+        as the books looked at the end of Day 5" is
+        value_date_through=2, known_through_day=5.
+        """
+        excluded = set(kinds_excluded)
+        total = currency.zero()
+        for entry in self._entries:
+            if entry.account_id != account_id:
+                continue
+            if entry.value_date > value_date_through:
+                continue
+            if known_through_day is not None and entry.posting_day > known_through_day:
+                continue
+            if entry.kind in excluded:
+                continue
+            total += entry.amount
+        return currency.quantize(total)
