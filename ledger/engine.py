@@ -22,13 +22,18 @@ AMBIGUITIES.md section 2 argues the case and names what it costs.
 
 from dataclasses import dataclass, field
 from decimal import Decimal
+from enum import Enum
 from typing import Optional
 
-from .entries import Journal
-from .events import Event
-from .money import Currency
+from .entries import Entry, Journal
+from .events import Event, EventType
+from .money import Currency, split_evenly
 
 WINDOW_DAYS = 6
+
+
+class Outcome(str, Enum):
+    POSTED = "POSTED"        # movement booked
 
 
 @dataclass(frozen=True)
@@ -36,6 +41,16 @@ class Account:
     id: str
     currency: Currency
     opening_balance: Decimal
+
+
+@dataclass
+class EventResult:
+    event_id: str
+    day: int
+    type: str
+    outcome: Outcome
+    detail: str
+    entries: tuple[Entry, ...] = ()
 
 
 @dataclass
@@ -105,8 +120,42 @@ class Engine:
             if event.posting_day > self.window:
                 raise ValueError(f"{event.id}: posting_day beyond the window")
         for day in range(1, self.window + 1):
+            for event in [e for e in events if e.posting_day == day]:
+                self.state.results.append(self._apply(event, day))
             self._close_day(day)
         return self.state
+
+    def _apply(self, event: Event, day: int) -> EventResult:
+        handler = {
+            EventType.CREDIT: self._apply_movement,
+            EventType.DEBIT: self._apply_movement,
+        }[event.type]
+        return handler(event, day)
+
+    def _apply_movement(self, event: Event, day: int) -> EventResult:
+        account = self.state.accounts[event.account_id]
+        sign = 1 if event.type is EventType.CREDIT else -1
+        shares = split_evenly(account.currency, event.amount, event.instalments)
+        entries = []
+        for index, share in enumerate(shares, start=1):
+            memo = (
+                f"{event.type.value.lower()} instalment {index}/{event.instalments}"
+                if event.instalments > 1 else event.type.value.lower()
+            )
+            entries.append(self.state.journal.append(
+                event_id=event.id,
+                account_id=event.account_id,
+                posting_day=day,
+                value_date=event.value_date,
+                amount=account.currency.quantize(Decimal(sign) * share),
+                kind=event.type.value,
+                memo=memo,
+            ))
+        detail = account.currency.format(event.amount)
+        if event.instalments > 1:
+            detail += " as " + " + ".join(str(s) for s in shares)
+        return EventResult(event.id, day, event.type.value, Outcome.POSTED,
+                           detail, tuple(entries))
 
     # ---------- end of day ----------
 
