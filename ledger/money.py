@@ -52,3 +52,28 @@ AED = Currency("AED", 2)
 BHD = Currency("BHD", 3)
 
 CURRENCIES = {c.code: c for c in (AED, BHD)}
+
+
+def split_evenly(currency: Currency, total: Decimal, parts: int) -> list[Decimal]:
+    """Split `total` into `parts` amounts that sum to exactly `total`.
+
+    Largest-remainder: every part is the floor share, then the leftover
+    quanta are handed out one each from the front. BHD 10.000 over three
+    parts gives 3.334 / 3.333 / 3.333 -- not three equal parts, because
+    three equal parts summing to 10.000 do not exist at 3 decimal places.
+    Preserving the sum is the invariant that matters; equality is the one
+    that gets sacrificed. See REJECTED.md (criterion 7).
+    """
+    if parts <= 0:
+        raise ValueError("parts must be positive")
+    total = currency.quantize(total)
+    quantum = currency.quantum
+    units = int((total / quantum).to_integral_value())
+    base, remainder = divmod(abs(units), parts)
+    sign = -1 if units < 0 else 1
+    shares = []
+    for index in range(parts):
+        unit_count = base + (1 if index < remainder else 0)
+        shares.append(currency.quantize(Decimal(sign * unit_count) * quantum))
+    assert sum(shares, currency.zero()) == total
+    return shares
