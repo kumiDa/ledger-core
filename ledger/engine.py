@@ -86,6 +86,8 @@ class DayReport:
     active_holds: Decimal
     available_balance: Decimal
     interest_accrued: Decimal
+    capitalized_interest: Decimal = Decimal(0)
+    closing_after_capitalization: Optional[Decimal] = None
 
 
 @dataclass
@@ -351,7 +353,7 @@ class Engine:
                 accrual = account.currency.quantize(closing * DAILY_INTEREST_RATE)
             self.state.accruals[account_id].append(accrual)
 
-            reports.append(DayReport(
+            report = DayReport(
                 day=day,
                 account_id=account_id,
                 closing_before_fee=before_fee,
@@ -360,5 +362,27 @@ class Engine:
                 active_holds=self.active_hold_total(account_id),
                 available_balance=self.available_balance(account_id, through_day=day),
                 interest_accrued=accrual,
-            ))
+            )
+
+            if day == self.window:
+                # The capitalized credit is *defined* as the sum of the rounded
+                # daily accruals, so the two agree by construction rather than
+                # by reconciliation. No remainder exists to discard.
+                total = sum(self.state.accruals[account_id], account.currency.zero())
+                total = account.currency.quantize(total)
+                if total != 0:
+                    self.state.journal.append(
+                        event_id=f"INTEREST-{account_id}",
+                        account_id=account_id,
+                        posting_day=day,
+                        value_date=day,
+                        amount=total,
+                        kind="INTEREST",
+                        memo=f"capitalized interest, days 1-{self.window}",
+                    )
+                report.capitalized_interest = total
+                report.closing_after_capitalization = self.ledger_balance(
+                    account_id, through_day=day
+                )
+            reports.append(report)
         self.state.days[day] = reports
